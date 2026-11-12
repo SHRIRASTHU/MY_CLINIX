@@ -19,6 +19,7 @@ import { AskAiPage } from './pages/AskAiPage';
 import { ReviewPage } from './pages/ReviewPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { GlobalPassportPage } from './pages/GlobalPassportPage';
 
 export const App: React.FC = () => {
   return (
@@ -41,6 +42,8 @@ export const App: React.FC = () => {
             >
               <Route index element={<Navigate to="/overview" replace />} />
               <Route path="overview" element={<OverviewPage />} />
+              <Route path="passport" element={<GlobalPassportPage />} />
+              <Route path="travel-mode" element={<GlobalPassportPage />} />
               <Route path="patients" element={<PatientsPage />} />
               <Route path="documents" element={<DocumentsPage />} />
               <Route path="timeline" element={<TimelinePage />} />
