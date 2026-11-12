@@ -457,8 +457,7 @@ export const PatientsPage: React.FC = () => {
               className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#0d9488]"
             >
               <option value="viewer">Viewer (Read-only access to timeline and findings)</option>
-              <option value="reviewer">Reviewer (Can audit findings and resolve contradictions)</option>
-              <option value="caregiver">Caregiver (Can upload documents and manage records)</option>
+              <option value="doctor">Doctor (Can audit findings, update notes, and resolve contradictions)</option>
               <option value="owner">Co-Owner (Full administrative permissions)</option>
             </select>
           </div>

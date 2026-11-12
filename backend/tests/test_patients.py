@@ -10,7 +10,7 @@ def get_auth_token(client, email, password, full_name, role="patient"):
 
 def test_patient_creation_and_isolation(client):
     token_a = get_auth_token(client, "alice@test.com", "Password123!", "Alice Wonder", "patient")
-    token_b = get_auth_token(client, "bob@test.com", "Password123!", "Bob Builder", "patient")
+    token_b = get_auth_token(client, "dr.bob@test.com", "Password123!", "Dr. Bob Builder", "doctor")
 
     headers_a = {"Authorization": f"Bearer {token_a}"}
     headers_b = {"Authorization": f"Bearer {token_b}"}
@@ -37,30 +37,31 @@ def test_patient_creation_and_isolation(client):
     assert len(list_a.json()) == 1
     assert list_a.json()[0]["id"] == patient_a_id
 
-    # Bob's patient list should be strictly EMPTY (Isolation)
+    # Dr. Bob's patient list should be strictly EMPTY initially (Isolation)
     list_b = client.get("/api/v1/patients", headers=headers_b)
     assert list_b.status_code == 200
     assert len(list_b.json()) == 0
 
-    # Bob attempts direct access to Alice's patient -> Must return 403 Forbidden
+    # Dr. Bob attempts direct access to Alice's patient -> Must return 403 Forbidden
     direct_access = client.get(f"/api/v1/patients/{patient_a_id}", headers=headers_b)
     assert direct_access.status_code == 403
     assert "Access denied" in direct_access.json()["detail"]
 
-    # Alice grants Bob caregiver access
+    # Alice grants Dr. Bob doctor access
     grant_res = client.post(
         f"/api/v1/patients/{patient_a_id}/access",
-        json={"user_email": "bob@test.com", "access_level": "caregiver"},
+        json={"user_email": "dr.bob@test.com", "access_level": "doctor"},
         headers=headers_a
     )
     assert grant_res.status_code == 201
+    assert grant_res.json()["access_level"] == "doctor"
 
-    # Bob can now view the patient profile
+    # Dr. Bob can now view the patient profile
     detail_b = client.get(f"/api/v1/patients/{patient_a_id}", headers=headers_b)
     assert detail_b.status_code == 200
     assert detail_b.json()["first_name"] == "Arthur"
 
-    # Bob (caregiver) can update notes
+    # Dr. Bob (doctor) can update notes
     update_res = client.put(
         f"/api/v1/patients/{patient_a_id}",
         json={"medical_notes": "Updated: Prescribed new ACE inhibitor."},
@@ -69,7 +70,7 @@ def test_patient_creation_and_isolation(client):
     assert update_res.status_code == 200
     assert "ACE inhibitor" in update_res.json()["medical_notes"]
 
-    # Bob (caregiver) CANNOT delete the record -> Only Owner/Admin can delete
+    # Dr. Bob (doctor) CANNOT delete the record -> Only Owner/Admin can delete
     delete_res_b = client.delete(f"/api/v1/patients/{patient_a_id}", headers=headers_b)
     assert delete_res_b.status_code == 403
 
@@ -79,3 +80,19 @@ def test_patient_creation_and_isolation(client):
 
     # Now detail returns 404
     assert client.get(f"/api/v1/patients/{patient_a_id}", headers=headers_a).status_code == 404
+
+def test_invalid_access_level_rejected(client):
+    token_a = get_auth_token(client, "alice2@test.com", "Password123!", "Alice Two", "patient")
+    token_target = get_auth_token(client, "target@test.com", "Password123!", "Target User", "patient")
+    headers_a = {"Authorization": f"Bearer {token_a}"}
+
+    create_res = client.post("/api/v1/patients", json={
+        "first_name": "Test", "last_name": "Patient", "date_of_birth": "1980-01-01"
+    }, headers=headers_a)
+    p_id = create_res.json()["id"]
+
+    # Attempting to grant invalid access level must fail with 422
+    inv_res = client.post(f"/api/v1/patients/{p_id}/access", json={
+        "user_email": "target@test.com", "access_level": "super_access"
+    }, headers=headers_a)
+    assert inv_res.status_code == 422

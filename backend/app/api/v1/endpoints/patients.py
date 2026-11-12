@@ -164,7 +164,7 @@ def update_patient(
         patient_id=patient_id,
         db=db,
         current_user=current_user,
-        required_levels=[AccessLevel.OWNER, AccessLevel.CAREGIVER]
+        required_levels=[AccessLevel.OWNER, AccessLevel.DOCTOR]
     )
 
     update_data = patient_in.model_dump(exclude_unset=True)

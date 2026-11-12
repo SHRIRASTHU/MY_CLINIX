@@ -1,4 +1,4 @@
-export type UserRole = 'administrator' | 'patient' | 'caregiver' | 'medical_reviewer';
+export type UserRole = 'administrator' | 'doctor' | 'patient';
 
 export interface User {
   id: string;
@@ -6,6 +6,7 @@ export interface User {
   full_name: string;
   role: UserRole;
   is_active: boolean;
+  is_verified?: boolean;
   created_at: string;
   updated_at: string;
 }

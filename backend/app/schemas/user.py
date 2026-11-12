@@ -5,7 +5,7 @@ from datetime import datetime
 class UserBase(BaseModel):
     email: EmailStr
     full_name: str = Field(..., min_length=2, max_length=255)
-    role: str = Field("patient", pattern="^(administrator|patient|caregiver|medical_reviewer)$")
+    role: str = Field("patient", pattern="^(administrator|doctor|patient)$")
 
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8, max_length=128)
@@ -18,10 +18,12 @@ class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     role: Optional[str] = None
     is_active: Optional[bool] = None
+    is_verified: Optional[bool] = None
 
 class UserOut(UserBase):
     id: str
     is_active: bool
+    is_verified: bool = True
     created_at: datetime
     updated_at: datetime
 

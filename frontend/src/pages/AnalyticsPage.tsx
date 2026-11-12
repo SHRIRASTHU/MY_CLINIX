@@ -19,7 +19,7 @@ export const AnalyticsPage: React.FC = () => {
             </Badge>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            System performance evaluation, extraction precision & recall, reviewer correction rates, and time savings.
+            System performance evaluation, extraction precision & recall, doctor correction rates, and time savings.
           </p>
         </div>
       </div>

@@ -4,9 +4,9 @@ from app.database.base import Base, TimestampMixin, generate_uuid
 
 class AccessLevel:
     OWNER = "owner"
-    CAREGIVER = "caregiver"
-    REVIEWER = "reviewer"
+    DOCTOR = "doctor"
     VIEWER = "viewer"
+    ADMINISTRATOR = "administrator"
 
 class PatientAccess(Base, TimestampMixin):
     __tablename__ = "patient_access"
