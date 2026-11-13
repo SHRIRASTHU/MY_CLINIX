@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     
     # Database
-    DATABASE_URL: str = "sqlite:///./myclinix.db"
+    DATABASE_URL: str = f"sqlite:///{(BASE_DIR / 'backend' / 'myclinix.db').as_posix()}"
     
     # Security
     JWT_SECRET_KEY: str = "super_secret_development_key_change_in_production_123456789"
