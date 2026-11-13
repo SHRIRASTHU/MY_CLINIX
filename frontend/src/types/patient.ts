@@ -45,20 +45,60 @@ export interface PatientDetail extends Patient {
   access_list: PatientAccessMember[];
 }
 
+export interface DocumentPageItem {
+  id: string;
+  document_id: string;
+  page_number: number;
+  text: string;
+  extraction_method: 'text_layer' | 'ocr' | 'ocr_unavailable' | string;
+  ocr_confidence: number;
+  text_sha256: string;
+}
+
 export interface MedicalDocument {
   id: string;
   patient_id: string;
   file_name: string;
-  file_path: string;
+  original_filename?: string;
+  file_path?: string;
+  stored_path?: string;
   file_size_bytes: number;
   mime_type: string;
   document_type: string;
+  source_hospital_or_clinic?: string;
   document_date: string;
   upload_date: string;
   processing_status: string;
   page_count: number;
+  version_number?: number;
+  is_deleted?: boolean;
+  deleted_at?: string;
+  deletion_reason?: string;
   ocr_extracted_text?: string;
   sha256_hash?: string;
+  file_sha256?: string;
+  pages?: DocumentPageItem[];
+}
+
+export interface ConsentRecord {
+  id: string;
+  patient_id: string;
+  doctor_id: string;
+  doctor_name?: string;
+  doctor_email?: string;
+  access_level: 'read_only' | 'read_write' | 'full';
+  scope?: string[];
+  granted_at: string;
+  revoked_at?: string;
+  revocation_reason?: string;
+  status: 'active' | 'revoked';
+}
+
+export interface DoctorLookupItem {
+  id: string;
+  full_name: string;
+  email: string;
+  is_verified: boolean;
 }
 
 export interface TimelineEvent {

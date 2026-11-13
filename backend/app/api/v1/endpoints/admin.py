@@ -1,15 +1,39 @@
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, desc
 from app.database.session import get_db
 from app.models.user import User, UserRole
 from app.models.patient import Patient
 from app.models.records import Document, Contradiction
+from app.models.audit import AuditLog
 from app.schemas.user import UserOut
 from app.api.deps import require_role
+from app.services.audit_service import log_event
 
 router = APIRouter()
+
+class AuditLogItemOut(BaseModel):
+    id: str
+    action: str
+    outcome: str
+    actor_id: Optional[str] = None
+    actor_name: Optional[str] = None
+    actor_email: Optional[str] = None
+    actor_role: Optional[str] = None
+    patient_id: Optional[str] = None
+    document_id: Optional[str] = None
+    request_ip: Optional[str] = None
+    created_at: str
+    extra_context: Optional[str] = None
+
+class PaginatedAuditLogsOut(BaseModel):
+    items: List[AuditLogItemOut]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
 
 @router.get("/users", response_model=List[UserOut])
 def list_users(
@@ -98,3 +122,71 @@ def get_admin_platform_stats(
         "total_documents": total_documents,
         "open_conflicts": open_conflicts,
     }
+
+@router.get("/audit-logs", response_model=PaginatedAuditLogsOut)
+def get_system_audit_logs(
+    request: Request,
+    action: Optional[str] = Query(None, description="Filter by audit action"),
+    actor_id: Optional[str] = Query(None, description="Filter by actor ID"),
+    patient_id: Optional[str] = Query(None, description="Filter by patient ID"),
+    outcome: Optional[str] = Query(None, description="Filter by outcome (success, failure, blocked)"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(50, ge=1, le=200, description="Items per page"),
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_role(UserRole.ADMIN.value)),
+):
+    """
+    Administrator-only: Query system-wide immutable audit logs for compliance & security review.
+    """
+    query = db.query(AuditLog)
+    if action:
+        query = query.filter(AuditLog.action == action)
+    if actor_id:
+        query = query.filter(AuditLog.actor_id == actor_id)
+    if patient_id:
+        query = query.filter(AuditLog.patient_id == patient_id)
+    if outcome:
+        query = query.filter(AuditLog.outcome == outcome)
+
+    total = query.count()
+    offset = (page - 1) * page_size
+    entries = query.order_by(AuditLog.created_at.desc()).offset(offset).limit(page_size).all()
+
+    items = []
+    for entry in entries:
+        actor = db.query(User).filter(User.id == entry.actor_id).first() if entry.actor_id else None
+        items.append(
+            AuditLogItemOut(
+                id=entry.id,
+                action=entry.action,
+                outcome=entry.outcome,
+                actor_id=entry.actor_id,
+                actor_name=actor.full_name if actor else None,
+                actor_email=actor.email if actor else None,
+                actor_role=entry.actor_role,
+                patient_id=entry.patient_id,
+                document_id=entry.document_id,
+                request_ip=entry.request_ip,
+                created_at=entry.created_at.isoformat(),
+                extra_context=entry.extra_context,
+            )
+        )
+
+    log_event(
+        db,
+        action="admin_audit_logs_view",
+        actor_id=admin_user.id,
+        actor_role=admin_user.role,
+        request=request,
+        extra={"page": page, "page_size": page_size, "filter_action": action}
+    )
+
+    total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+
+    return PaginatedAuditLogsOut(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+    )

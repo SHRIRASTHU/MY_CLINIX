@@ -22,6 +22,8 @@ import { AnalyticsPage } from './pages/AnalyticsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { GlobalPassportPage } from './pages/GlobalPassportPage';
 import { AskAiPage } from './pages/AskAiPage';
+import { ConsentPage } from './pages/ConsentPage';
+import { AuditLogPage } from './pages/AuditLogPage';
 
 export const App: React.FC = () => {
   return (
@@ -74,6 +76,19 @@ export const App: React.FC = () => {
 
               {/* Section 10: Settings */}
               <Route path="settings" element={<SettingsPage />} />
+
+              {/* Patient Consent & Doctor Authorization */}
+              <Route path="consent" element={<ConsentPage />} />
+
+              {/* Administrator Audit Trail (Administrator Only) */}
+              <Route
+                path="admin/audit-logs"
+                element={
+                  <ProtectedRoute allowedRoles={['administrator']}>
+                    <AuditLogPage />
+                  </ProtectedRoute>
+                }
+              />
 
               {/* Patient Management (for Doctor & Administrator) */}
               <Route path="patients" element={<PatientsPage />} />

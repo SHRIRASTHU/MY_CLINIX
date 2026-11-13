@@ -1,13 +1,13 @@
 import os
 from pathlib import Path
-from typing import List, Union
+from typing import List, Union, Optional
 from pydantic import AnyHttpUrl, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 import json
 import os
 from pathlib import Path
-from typing import List, Union
+from typing import List, Union, Optional
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -36,8 +36,13 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
     
-    # Storage
+    # Storage & Encryption
     UPLOAD_DIRECTORY: str = str(ROOT_DIR / "uploads")
+    DOCUMENT_ENCRYPTION_KEY: Optional[str] = None  # 64-character hex string (32 bytes AES-256-GCM)
+    TRASH_RETENTION_DAYS: int = 30  # Default document retention period in days
+    
+    # OCR Engine
+    TESSERACT_CMD: Optional[str] = None
     
     # CORS
     CORS_ORIGINS: Union[List[str], str] = [

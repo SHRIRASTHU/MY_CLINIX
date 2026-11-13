@@ -30,6 +30,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import { usePatient } from '../hooks/usePatient';
 import { adminService } from '../services/adminService';
+import { recordService } from '../services/recordService';
 import { User as UserType } from '../types/auth';
 import { BloodGroup } from '../types/patient';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
@@ -69,6 +70,34 @@ export const SettingsPage: React.FC = () => {
   const [notifDocumentUploads, setNotifDocumentUploads] = useState(true);
   const [notifReminders, setNotifReminders] = useState(false);
   const [notifSaved, setNotifSaved] = useState(false);
+
+  // GDPR Data Portability Export
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportSuccess, setExportSuccess] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const handleExportGDPR = async () => {
+    if (!selectedPatient) return;
+    try {
+      setExportLoading(true);
+      setExportError(null);
+      const data = await recordService.exportPatientData(selectedPatient.id);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `patient_data_export_${selectedPatient.id}_${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setExportSuccess('Complete GDPR-compliant patient data archive successfully exported.');
+      setTimeout(() => setExportSuccess(null), 5000);
+    } catch (err: any) {
+      console.error('Failed to export patient records:', err);
+      setExportError(err?.message || 'Failed to export patient records');
+    } finally {
+      setExportLoading(false);
+    }
+  };
 
   // Administrator State
   const [userList, setUserList] = useState<UserType[]>([]);
@@ -635,40 +664,84 @@ export const SettingsPage: React.FC = () => {
       {/* ============================================================ */}
       {activeTab === 'privacy' && (
         <div className="space-y-6 max-w-3xl">
+          {exportSuccess && (
+            <Alert type="success" title="Data Export Ready">
+              {exportSuccess}
+            </Alert>
+          )}
+          {exportError && (
+            <Alert type="error" title="Export Failed">
+              {exportError}
+            </Alert>
+          )}
+
           <Card>
             <CardHeader>
-              <CardTitle>Evidentiary Privacy & Compliance</CardTitle>
+              <CardTitle>GDPR Article 20: Right to Data Portability</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 text-xs text-slate-600">
-              <div className="p-4 bg-teal-50/50 rounded-xl border border-teal-200">
-                <div className="flex items-center gap-2 font-bold text-[#0f2b48] mb-1">
-                  <Shield className="w-4 h-4 text-[#0d9488]" />
-                  <span>Strict Patient Record Isolation Policy</span>
-                </div>
-                <p className="text-[11px] text-slate-600 leading-relaxed">
-                  Your medical data is encrypted in transit and at rest. Access to your records is governed strictly by cryptographic tokens and explicitly granted permissions to verified doctors and platform administrators.
-                </p>
-              </div>
+              <p className="text-slate-600 leading-relaxed">
+                As a patient, you have the full legal right to export all personal health data, clinical records, diagnostic page extractions, and SHA-256 evidentiary hashes stored within MY CLINIX in a structured, machine-readable JSON format.
+              </p>
 
-              <div className="space-y-2">
-                <div className="font-semibold text-slate-800">Your Data Rights:</div>
-                <ul className="list-disc pl-5 space-y-1 text-slate-600">
-                  <li>Permanent access to all uploaded original documents and SHA-256 integrity proofs.</li>
-                  <li>Tamper-evident record of all physician reviews, notes, and contradiction resolutions.</li>
-                  <li>Right to export your complete medical timeline and health passport at any time.</li>
-                </ul>
+              <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-1 font-mono text-[11px] text-slate-700">
+                <div>• Patient demographic profile & emergency contacts</div>
+                <div>• Complete consolidated medical document metadata</div>
+                <div>• OCR page-by-page extractions & cryptographic hashes</div>
+                <div>• Active and historical doctor consent authorizations</div>
               </div>
 
               <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
-                <span className="text-slate-500 text-[11px]">Download machine-readable evidentiary archive (JSON / PDF)</span>
+                <span className="text-slate-500 text-[11px]">Structured JSON Data Package</span>
                 <Button
-                  variant="outline"
+                  variant="primary"
                   size="sm"
                   icon={<Download className="w-3.5 h-3.5" />}
-                  onClick={() => alert('Exporting complete patient health record package...')}
+                  loading={exportLoading}
+                  onClick={handleExportGDPR}
+                  disabled={!selectedPatient}
                 >
-                  Export Health Record
+                  Export Complete Patient Record (JSON)
                 </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Data Retention, Storage & Security Architecture</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4 text-xs text-slate-600">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
+                  <div className="flex items-center gap-2 font-bold text-slate-800 mb-1">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                    <span>AES-256-GCM Encryption</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    All uploaded reports, scans, and consultation notes are encrypted at rest with authenticated 256-bit Galois/Counter Mode. File system paths are never disclosed over API endpoints.
+                  </p>
+                </div>
+
+                <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
+                  <div className="flex items-center gap-2 font-bold text-slate-800 mb-1">
+                    <Database className="w-4 h-4 text-teal-600" />
+                    <span>30-Day Soft-Deletion Retention</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Deleted records are safely moved to an administrative quarantine trash for 30 days before permanent deletion, preventing accidental clinical data loss.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-amber-50/50 rounded-xl border border-amber-200">
+                <div className="flex items-center gap-2 font-bold text-amber-900 mb-1">
+                  <Key className="w-4 h-4 text-amber-700" />
+                  <span>Patient-Controlled Access Granularity</span>
+                </div>
+                <p className="text-[11px] text-amber-800">
+                  Doctors cannot access your consolidated history across clinics without active patient consent. You can grant, customize scope, or revoke access immediately at any time.
+                </p>
               </div>
             </CardContent>
           </Card>

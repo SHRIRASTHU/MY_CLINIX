@@ -16,10 +16,11 @@ logger = logging.getLogger("myclinix")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: ensure tables exist and demo data is seeded
-    logger.info("Starting up MY CLINIX backend...")
-    init_db()
-    logger.info("Database initialized successfully.")
+    # Startup: ensure tables exist and demo data is seeded when not in testing mode
+    if os.environ.get("TESTING") != "true":
+        logger.info("Starting up MY CLINIX backend...")
+        init_db()
+        logger.info("Database initialized successfully.")
     yield
     # Shutdown logic if any
     logger.info("Shutting down MY CLINIX backend...")

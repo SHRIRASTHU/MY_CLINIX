@@ -1,4 +1,4 @@
-from sqlalchemy import String, Integer, Float, Text, ForeignKey, DateTime
+from sqlalchemy import String, Integer, Float, Text, ForeignKey, DateTime, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import Optional
 from datetime import datetime, timezone
@@ -17,24 +17,60 @@ class Document(Base, TimestampMixin):
     mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
     sha256_hash: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
     
-    # Document categorization & dates
+    # Document categorization, origin & versioning
     document_type: Mapped[str] = mapped_column(String(100), default="other", nullable=False) # prescription, lab_report, etc.
+    source_hospital_or_clinic: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     document_date: Mapped[Optional[str]] = mapped_column(String(50), nullable=True) # Clinically recorded date
     upload_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    version_number: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     
     # Processing state
     processing_status: Mapped[str] = mapped_column(String(50), default="uploaded", nullable=False) # uploaded, processing, completed, failed
     ocr_extracted_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     page_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+
+    # Soft deletion & retention (GDPR Right to Erasure / Retention Policy)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_by_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    deletion_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
     # Relationships
     patient = relationship("Patient", back_populates="documents")
-    uploader = relationship("User")
+    uploader = relationship("User", foreign_keys=[uploader_id])
+    deleter = relationship("User", foreign_keys=[deleted_by_id])
+    pages = relationship("DocumentPage", back_populates="document", cascade="all, delete-orphan", order_by="DocumentPage.page_number")
     findings = relationship("ExtractedFinding", back_populates="document", cascade="all, delete-orphan")
     events = relationship("MedicalEvent", back_populates="document")
     medications = relationship("Medication", back_populates="document")
     allergies = relationship("Allergy", back_populates="document")
     investigations = relationship("Investigation", back_populates="document")
+
+    @property
+    def original_filename(self) -> str:
+        return self.file_name
+
+    @property
+    def stored_path(self) -> str:
+        return self.file_path
+
+    @property
+    def file_sha256(self) -> str:
+        return self.sha256_hash
+
+class DocumentPage(Base, TimestampMixin):
+    __tablename__ = "document_pages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    document_id: Mapped[str] = mapped_column(String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    page_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    extraction_method: Mapped[str] = mapped_column(String(50), default="text_layer", nullable=False)  # text_layer, ocr, ocr_unavailable
+    ocr_confidence: Mapped[float] = mapped_column(Float, default=100.0, nullable=False)  # 0.0 - 100.0
+    text_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    # Relationships
+    document = relationship("Document", back_populates="pages")
 
 class ExtractedFinding(Base, TimestampMixin):
     __tablename__ = "extracted_findings"

@@ -4,6 +4,7 @@ from app.models.patient import Patient
 from app.models.patient_access import PatientAccess, AccessLevel
 from app.models.records import (
     Document,
+    DocumentPage,
     ExtractedFinding,
     MedicalEvent,
     Medication,
@@ -14,6 +15,8 @@ from app.models.records import (
     ReviewHistory,
     ChatHistory,
 )
+from app.models.audit import AuditLog
+from app.models.consent import ConsentRecord
 
 __all__ = [
     "Base",
@@ -23,6 +26,7 @@ __all__ = [
     "PatientAccess",
     "AccessLevel",
     "Document",
+    "DocumentPage",
     "ExtractedFinding",
     "MedicalEvent",
     "Medication",
@@ -32,4 +36,6 @@ __all__ = [
     "DuplicateRecord",
     "ReviewHistory",
     "ChatHistory",
+    "AuditLog",
+    "ConsentRecord",
 ]

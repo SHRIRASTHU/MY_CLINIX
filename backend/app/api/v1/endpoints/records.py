@@ -1,15 +1,20 @@
 import os
+import uuid
 import hashlib
 from typing import List, Optional
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
+from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query, Request, Response
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, asc
+from sqlalchemy import desc, asc, func
 from app.database.session import get_db
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.models.patient import Patient
+from app.models.patient_access import PatientAccess, AccessLevel
 from app.models.records import (
     Document,
+    DocumentPage,
     ExtractedFinding,
     MedicalEvent,
     Medication,
@@ -20,8 +25,14 @@ from app.models.records import (
 )
 from app.api.deps import get_current_user, get_patient_with_access
 from app.core.config import settings
+from app.services.ocr_service import extract_text_from_file
+from app.services.storage_service import storage
+from app.services.audit_service import log_event
 
 router = APIRouter()
+
+class DocumentDeleteRequest(BaseModel):
+    reason: Optional[str] = Field(None, description="Clinical or patient justification for record deletion")
 
 # -------------------------------------------------------------
 # 1. Documents API
@@ -30,9 +41,12 @@ router = APIRouter()
 @router.get("/{patient_id}/documents")
 def list_patient_documents(
     patient_id: str,
+    request: Request,
     category: Optional[str] = Query(None, description="Filter by category e.g. prescription, lab_report, scan, discharge, consultation"),
-    search: Optional[str] = Query(None, description="Search in document title or OCR text"),
+    hospital: Optional[str] = Query(None, description="Filter by source hospital or clinic"),
+    search: Optional[str] = Query(None, description="Search in document title, OCR text, or clinic"),
     sort_by: Optional[str] = Query("newest", description="newest, oldest, name"),
+    include_deleted: bool = Query(False, description="Administrator only: include documents in trash"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -40,12 +54,25 @@ def list_patient_documents(
     patient = get_patient_with_access(patient_id=patient_id, db=db, current_user=current_user)
     query = db.query(Document).filter(Document.patient_id == patient.id)
 
+    # Soft-deletion quarantine / trash filtering
+    if include_deleted and current_user.role == UserRole.ADMIN.value:
+        pass  # Admin explicitly requested trash view
+    else:
+        query = query.filter(Document.is_deleted == False)
+
     if category and category != "all":
         query = query.filter(Document.document_type == category)
 
+    if hospital and hospital != "all":
+        query = query.filter(Document.source_hospital_or_clinic.ilike(f"%{hospital.strip()}%"))
+
     if search:
         s = f"%{search.strip().lower()}%"
-        query = query.filter(Document.file_name.ilike(s) | Document.ocr_extracted_text.ilike(s))
+        query = query.filter(
+            Document.file_name.ilike(s) | 
+            Document.ocr_extracted_text.ilike(s) |
+            Document.source_hospital_or_clinic.ilike(s)
+        )
 
     if sort_by == "oldest":
         query = query.order_by(asc(Document.upload_date))
@@ -55,86 +82,203 @@ def list_patient_documents(
         query = query.order_by(desc(Document.upload_date))
 
     docs = query.all()
+
+    log_event(
+        db,
+        action="document_access",
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        patient_id=patient.id,
+        request=request,
+        extra={"count": len(docs), "category": category}
+    )
+
     return [
         {
             "id": d.id,
             "patient_id": d.patient_id,
             "file_name": d.file_name,
-            "file_path": d.file_path,
+            "original_filename": d.file_name,
             "file_size_bytes": d.file_size_bytes,
             "mime_type": d.mime_type,
             "document_type": d.document_type,
+            "source_hospital_or_clinic": d.source_hospital_or_clinic,
             "document_date": d.document_date or d.upload_date.strftime("%Y-%m-%d"),
             "upload_date": d.upload_date.isoformat(),
             "processing_status": d.processing_status,
+            "version_number": d.version_number,
+            "is_deleted": d.is_deleted,
+            "deleted_at": d.deleted_at.isoformat() if d.deleted_at else None,
+            "deletion_reason": d.deletion_reason,
             "page_count": d.page_count,
             "ocr_extracted_text": d.ocr_extracted_text or "",
             "sha256_hash": d.sha256_hash,
+            "file_sha256": d.sha256_hash,
+            "pages": [
+                {
+                    "id": p.id,
+                    "document_id": p.document_id,
+                    "page_number": p.page_number,
+                    "text": p.text,
+                    "extraction_method": p.extraction_method,
+                    "ocr_confidence": p.ocr_confidence,
+                    "text_sha256": p.text_sha256,
+                }
+                for p in d.pages
+            ],
         }
         for d in docs
     ]
 
+ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"}
+MAX_DOCUMENT_SIZE_BYTES = 25 * 1024 * 1024  # 25 MB
+
 @router.post("/{patient_id}/documents", status_code=status.HTTP_201_CREATED)
 async def upload_patient_document(
     patient_id: str,
+    request: Request,
     file: UploadFile = File(...),
     document_type: str = Form("other"),
     document_date: Optional[str] = Form(None),
+    source_hospital_or_clinic: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Upload and preserve an authentic medical document for the patient record."""
+    """
+    Upload and preserve an authentic medical document for the patient record.
+    Restricted to doctor and administrator roles.
+    Encrypted at rest with AES-256-GCM.
+    Extracts text per-page (PDF native text layer or OCR fallback).
+    Automatic version tracking when updated records are uploaded.
+    """
+    # 1. Role validation
+    if current_user.role not in ["doctor", "administrator"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only doctors and administrators may upload clinical records."
+        )
+
     patient = get_patient_with_access(patient_id=patient_id, db=db, current_user=current_user)
 
+    # 2. File extension validation
+    original_filename = file.filename or "medical_record.pdf"
+    file_ext = os.path.splitext(original_filename)[1].lower()
+    if file_ext not in ALLOWED_DOCUMENT_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported file format '{file_ext}'. Allowed formats: PDF, PNG, JPG, JPEG, TIFF, BMP, WEBP."
+        )
+
+    # 3. File content & size validation
     content = await file.read()
     if len(content) == 0:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty.")
+    if len(content) > MAX_DOCUMENT_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File size ({len(content)} bytes) exceeds the maximum allowed limit of 25 MB."
+        )
 
+    # 4. SHA-256 calculation & duplicate check
     sha256 = hashlib.sha256(content).hexdigest()
-    
-    # Check duplicate
-    existing_doc = db.query(Document).filter(
+    existing_exact_hash = db.query(Document).filter(
         Document.patient_id == patient.id,
-        Document.sha256_hash == sha256
+        Document.sha256_hash == sha256,
+        Document.is_deleted == False,
     ).first()
-    if existing_doc:
-        raise HTTPException(status_code=400, detail=f"Exact duplicate detected: This file matches '{existing_doc.file_name}' (SHA-256: {sha256[:12]}...)")
+    if existing_exact_hash:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Exact duplicate detected: This file matches '{existing_exact_hash.file_name}' (SHA-256: {sha256[:12]}...)"
+        )
 
-    save_dir = settings.UPLOAD_DIRECTORY
-    os.makedirs(save_dir, exist_ok=True)
-    safe_filename = f"{patient.id}_{int(datetime.now(timezone.utc).timestamp())}_{file.filename}"
-    saved_path = os.path.join(save_dir, safe_filename)
+    # 5. Versioning: if document with same filename exists, increment version
+    max_ver = db.query(func.max(Document.version_number)).filter(
+        Document.patient_id == patient.id,
+        Document.file_name == original_filename,
+    ).scalar()
+    version_number = (max_ver + 1) if max_ver else 1
 
-    with open(saved_path, "wb") as f:
+    # 6. Extract OCR text using temporary scratch file
+    unique_filename = f"{uuid.uuid4().hex}_{patient.id}{file_ext}"
+    temp_dir = settings.UPLOAD_DIRECTORY
+    os.makedirs(temp_dir, exist_ok=True)
+    temp_path = os.path.join(temp_dir, f"temp_{unique_filename}")
+    with open(temp_path, "wb") as f:
         f.write(content)
 
-    doc_date = document_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    ocr_preview = f"Preserved Clinical Document: {file.filename}\nIngested on {doc_date}.\nCryptographic SHA-256 Hash: {sha256}\nDocument Category: {document_type}."
+    try:
+        extracted_pages = await run_in_threadpool(
+            extract_text_from_file, temp_path, file.content_type
+        )
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
 
+    if not extracted_pages:
+        fallback_hash = hashlib.sha256(b"").hexdigest()
+        extracted_pages = [{
+            "page_number": 1,
+            "text": f"Document: {original_filename}",
+            "method": "text_layer",
+            "confidence": 100.0,
+            "text_sha256": fallback_hash,
+        }]
+
+    page_count = len(extracted_pages)
+    full_extracted_text = "\n\n--- Page Break ---\n\n".join([p["text"] for p in extracted_pages])
+
+    # 7. Secure storage persistence (Encrypted at rest via AES-256-GCM)
+    saved_path = storage.save(content, unique_filename)
+
+    doc_date = document_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # 8. Create Document record
     doc = Document(
         patient_id=patient.id,
         uploader_id=current_user.id,
-        file_name=file.filename or "medical_record.pdf",
+        file_name=original_filename,
         file_path=saved_path,
         file_size_bytes=len(content),
-        mime_type=file.content_type or "application/pdf",
+        mime_type=file.content_type or ("application/pdf" if file_ext == ".pdf" else "image/png"),
         sha256_hash=sha256,
         document_type=document_type,
+        source_hospital_or_clinic=source_hospital_or_clinic.strip() if source_hospital_or_clinic else None,
         document_date=doc_date,
+        version_number=version_number,
         processing_status="completed",
-        ocr_extracted_text=ocr_preview,
-        page_count=1,
+        ocr_extracted_text=full_extracted_text,
+        page_count=page_count,
+        is_deleted=False,
     )
     db.add(doc)
     db.flush()
 
-    # Automatically add a timeline event for ingestion
+    # 9. Create DocumentPage records
+    saved_pages = []
+    for p in extracted_pages:
+        page_rec = DocumentPage(
+            document_id=doc.id,
+            page_number=p["page_number"],
+            text=p["text"],
+            extraction_method=p["method"],
+            ocr_confidence=float(p["confidence"]),
+            text_sha256=p["text_sha256"],
+        )
+        db.add(page_rec)
+        saved_pages.append(page_rec)
+    db.flush()
+
+    # 10. Automatically add a timeline event for ingestion
     event = MedicalEvent(
         patient_id=patient.id,
         document_id=doc.id,
         event_type=document_type if document_type in ['consultation', 'lab_investigation', 'scan', 'admission'] else 'other',
-        title=f"Record Ingested: {doc.file_name}",
-        description=f"Preserved original {document_type.replace('_', ' ')} with SHA-256 verification.",
+        title=f"Record Ingested: {doc.file_name} (v{version_number})",
+        description=f"Preserved original {document_type.replace('_', ' ')} with SHA-256 verification and {page_count} page(s) extracted." + (f" Source: {source_hospital_or_clinic}." if source_hospital_or_clinic else ""),
         event_date=doc_date,
         verification_status="verified",
     )
@@ -142,17 +286,367 @@ async def upload_patient_document(
     db.commit()
     db.refresh(doc)
 
+    log_event(
+        db,
+        action="document_upload",
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        patient_id=patient.id,
+        document_id=doc.id,
+        request=request,
+        extra={
+            "file_name": doc.file_name,
+            "version": version_number,
+            "page_count": page_count,
+            "hospital": doc.source_hospital_or_clinic,
+        }
+    )
+
     return {
         "id": doc.id,
+        "document_id": doc.id,
         "patient_id": doc.patient_id,
         "file_name": doc.file_name,
+        "original_filename": doc.file_name,
+        "file_path": doc.file_path,
+        "stored_path": doc.file_path,
+        "file_size_bytes": doc.file_size_bytes,
+        "mime_type": doc.mime_type,
         "document_type": doc.document_type,
+        "source_hospital_or_clinic": doc.source_hospital_or_clinic,
         "document_date": doc.document_date,
         "upload_date": doc.upload_date.isoformat(),
-        "file_size_bytes": doc.file_size_bytes,
         "processing_status": doc.processing_status,
+        "version_number": doc.version_number,
+        "is_deleted": doc.is_deleted,
+        "page_count": doc.page_count,
         "sha256_hash": doc.sha256_hash,
+        "file_sha256": doc.sha256_hash,
+        "ocr_extracted_text": doc.ocr_extracted_text,
+        "pages": [
+            {
+                "id": p.id,
+                "document_id": p.document_id,
+                "page_number": p.page_number,
+                "text": p.text,
+                "extraction_method": p.extraction_method,
+                "ocr_confidence": p.ocr_confidence,
+                "text_sha256": p.text_sha256,
+            }
+            for p in saved_pages
+        ],
     }
+
+@router.get("/{patient_id}/documents/{document_id}/download")
+def download_patient_document(
+    patient_id: str,
+    document_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Secure authenticated document download.
+    Streams decrypted document bytes directly without exposing server filesystem paths.
+    """
+    patient = get_patient_with_access(patient_id=patient_id, db=db, current_user=current_user)
+    doc = db.query(Document).filter(
+        Document.id == document_id,
+        Document.patient_id == patient.id,
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Medical document not found.")
+
+    if doc.is_deleted and current_user.role != UserRole.ADMIN.value:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Medical document has been deleted.")
+
+    try:
+        file_bytes = storage.load(doc.file_path)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve document content from secure storage."
+        )
+
+    log_event(
+        db,
+        action="document_download",
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        patient_id=patient.id,
+        document_id=doc.id,
+        request=request,
+    )
+
+    return Response(
+        content=file_bytes,
+        media_type=doc.mime_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{doc.file_name}"',
+            "Content-Length": str(len(file_bytes)),
+        }
+    )
+
+@router.delete("/{patient_id}/documents/{document_id}")
+def delete_patient_document(
+    patient_id: str,
+    document_id: str,
+    request: Request,
+    reason: Optional[str] = Query(None, description="Reason for deletion"),
+    payload: Optional[DocumentDeleteRequest] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Soft-delete a medical document to trash.
+    Preserves audit history and original file for clinical-legal retention compliance.
+    """
+    patient = get_patient_with_access(patient_id=patient_id, db=db, current_user=current_user)
+    if current_user.role not in ["doctor", "administrator"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only doctors and administrators may delete medical records."
+        )
+
+    doc = db.query(Document).filter(
+        Document.id == document_id,
+        Document.patient_id == patient.id,
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Medical document not found.")
+
+    deletion_reason = (payload.reason if payload and payload.reason else reason) or "Record deletion requested"
+    doc.is_deleted = True
+    doc.deleted_at = datetime.now(timezone.utc)
+    doc.deleted_by_id = current_user.id
+    doc.deletion_reason = deletion_reason
+    db.commit()
+
+    log_event(
+        db,
+        action="document_delete_request",
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        patient_id=patient.id,
+        document_id=doc.id,
+        request=request,
+        extra={"reason": deletion_reason, "file_name": doc.file_name}
+    )
+
+    return {
+        "message": f"Document '{doc.file_name}' soft-deleted and moved to trash.",
+        "id": doc.id,
+        "is_deleted": True,
+        "deleted_at": doc.deleted_at.isoformat(),
+    }
+
+@router.post("/{patient_id}/documents/{document_id}/restore")
+def restore_patient_document(
+    patient_id: str,
+    document_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Administrator-only: Restore a soft-deleted medical document from trash."""
+    if current_user.role != UserRole.ADMIN.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only system administrators may restore soft-deleted clinical records."
+        )
+
+    patient = get_patient_with_access(patient_id=patient_id, db=db, current_user=current_user)
+    doc = db.query(Document).filter(
+        Document.id == document_id,
+        Document.patient_id == patient.id,
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Medical document not found.")
+
+    doc.is_deleted = False
+    doc.deleted_at = None
+    doc.deleted_by_id = None
+    doc.deletion_reason = None
+    db.commit()
+
+    log_event(
+        db,
+        action="document_restore",
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        patient_id=patient.id,
+        document_id=doc.id,
+        request=request,
+    )
+
+    return {
+        "message": f"Document '{doc.file_name}' restored successfully from trash.",
+        "id": doc.id,
+        "is_deleted": False,
+    }
+
+@router.get("/{patient_id}/export")
+def export_patient_clinical_data(
+    patient_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    GDPR Article 20 - Right to Data Portability.
+    Exports complete patient clinical profile, metadata, extracted OCR text, and clinical records.
+    Restricted to patient owner or system administrator.
+    """
+    patient = get_patient_with_access(patient_id=patient_id, db=db, current_user=current_user)
+
+    if current_user.role != UserRole.ADMIN.value:
+        owner_access = db.query(PatientAccess).filter(
+            PatientAccess.patient_id == patient.id,
+            PatientAccess.user_id == current_user.id,
+            PatientAccess.access_level.in_([AccessLevel.OWNER, AccessLevel.ADMINISTRATOR]),
+        ).first()
+        if not owner_access and patient.created_by_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the patient or administrator can export complete medical records."
+            )
+
+    # Documents & pages
+    active_docs = db.query(Document).filter(
+        Document.patient_id == patient.id,
+        Document.is_deleted == False,
+    ).order_by(Document.upload_date.desc()).all()
+
+    docs_export = []
+    for d in active_docs:
+        docs_export.append({
+            "id": d.id,
+            "file_name": d.file_name,
+            "document_type": d.document_type,
+            "source_hospital_or_clinic": d.source_hospital_or_clinic,
+            "document_date": d.document_date,
+            "upload_date": d.upload_date.isoformat(),
+            "sha256_hash": d.sha256_hash,
+            "page_count": d.page_count,
+            "version_number": d.version_number,
+            "extracted_text": d.ocr_extracted_text,
+            "pages": [
+                {
+                    "page_number": p.page_number,
+                    "extraction_method": p.extraction_method,
+                    "ocr_confidence": p.ocr_confidence,
+                    "text_sha256": p.text_sha256,
+                    "text": p.text,
+                }
+                for p in d.pages
+            ]
+        })
+
+    # Timeline events
+    events = db.query(MedicalEvent).filter(MedicalEvent.patient_id == patient.id).order_by(MedicalEvent.event_date.asc()).all()
+    events_export = [
+        {"id": e.id, "title": e.title, "description": e.description, "event_type": e.event_type, "event_date": e.event_date}
+        for e in events
+    ]
+
+    # Medications
+    meds = db.query(Medication).filter(Medication.patient_id == patient.id).all()
+    meds_export = [
+        {"id": m.id, "medicine_name": m.medicine_name, "dosage": m.dosage, "frequency": m.frequency, "status": m.status}
+        for m in meds
+    ]
+
+    # Allergies
+    allergies = db.query(Allergy).filter(Allergy.patient_id == patient.id).all()
+    allergies_export = [
+        {"id": a.id, "allergen": a.allergen, "reaction": a.reaction, "severity": a.severity, "status": a.status}
+        for a in allergies
+    ]
+
+    # Investigations
+    investigations = db.query(Investigation).filter(Investigation.patient_id == patient.id).all()
+    inv_export = [
+        {"id": i.id, "test_name": i.test_name, "result_value": i.result_value, "unit": i.original_unit, "test_date": i.test_date}
+        for i in investigations
+    ]
+
+    log_event(
+        db,
+        action="patient_data_export",
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        patient_id=patient.id,
+        request=request,
+    )
+
+    return {
+        "export_metadata": {
+            "platform": "MY CLINIX Unified Medical Record Consolidation Platform",
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "export_type": "GDPR Article 20 Medical Portability Export",
+            "actor_id": current_user.id,
+        },
+        "patient": {
+            "id": patient.id,
+            "first_name": patient.first_name,
+            "last_name": patient.last_name,
+            "date_of_birth": patient.date_of_birth,
+            "gender": patient.gender,
+            "blood_group": patient.blood_group,
+            "emergency_contact_name": patient.emergency_contact_name,
+            "emergency_contact_phone": patient.emergency_contact_phone,
+            "medical_notes": patient.medical_notes,
+        },
+        "documents": docs_export,
+        "timeline_events": events_export,
+        "medications": meds_export,
+        "allergies": allergies_export,
+        "investigations": inv_export,
+    }
+
+@router.get("/{patient_id}/documents/{document_id}/pages")
+def get_document_pages(
+    patient_id: str,
+    document_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Retrieve all extracted text pages and OCR confidence metrics for a medical document."""
+    patient = get_patient_with_access(patient_id=patient_id, db=db, current_user=current_user)
+    doc = db.query(Document).filter(
+        Document.id == document_id,
+        Document.patient_id == patient.id
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Medical document not found.")
+
+    pages = db.query(DocumentPage).filter(
+        DocumentPage.document_id == doc.id
+    ).order_by(DocumentPage.page_number.asc()).all()
+
+    log_event(
+        db,
+        action="document_pages_access",
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        patient_id=patient.id,
+        document_id=doc.id,
+        request=request,
+    )
+
+    return [
+        {
+            "id": p.id,
+            "document_id": p.document_id,
+            "page_number": p.page_number,
+            "text": p.text,
+            "extraction_method": p.extraction_method,
+            "ocr_confidence": p.ocr_confidence,
+            "text_sha256": p.text_sha256,
+        }
+        for p in pages
+    ]
 
 # -------------------------------------------------------------
 # 2. Chronological Medical Timeline API

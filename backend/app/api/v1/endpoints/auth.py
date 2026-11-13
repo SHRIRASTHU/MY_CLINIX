@@ -1,5 +1,7 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status
+import time
+from collections import defaultdict
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
@@ -8,13 +10,20 @@ from app.models.user import User, UserRole
 from app.schemas.user import UserCreate, UserLogin, UserOut, Token
 from app.core.security import hash_password, verify_password, create_access_token
 from app.api.deps import get_current_user
+from app.services.audit_service import log_event, get_client_ip
 
 logger = logging.getLogger("myclinix.auth")
+
+# In-memory sliding-window rate limiter for brute-force protection (development/single-instance)
+# Production deployments should configure Nginx / Cloudflare / Redis rate limiting.
+_login_attempts: dict[str, list[float]] = defaultdict(list)
+MAX_LOGIN_ATTEMPTS = 10
+RATE_LIMIT_WINDOW_SECONDS = 15 * 60  # 15 minutes
 
 router = APIRouter()
 
 @router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED)
-def register(user_in: UserCreate, db: Session = Depends(get_db)):
+def register(user_in: UserCreate, request: Request, db: Session = Depends(get_db)):
     """Register a new user account with role-based access control."""
     clean_email = user_in.email.lower().strip()
     logger.info(f"Registration request received for email: {clean_email} with role: {user_in.role}")
@@ -56,15 +65,44 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
             detail="Failed to register user due to a database error."
         )
 
+    log_event(
+        db,
+        action="register",
+        actor_id=user.id,
+        actor_role=user.role,
+        request=request,
+        extra={"role": user.role}
+    )
+
     token = create_access_token(subject=user.id, role=user.role)
     return Token(access_token=token, token_type="bearer", user=UserOut.model_validate(user))
 
 @router.post("/login", response_model=Token)
-def login(login_data: UserLogin, db: Session = Depends(get_db)):
+def login(login_data: UserLogin, request: Request, db: Session = Depends(get_db)):
     """Authenticate user with email and password and return a JWT access token."""
     clean_email = login_data.email.lower().strip()
     logger.info(f"Login attempt for: {clean_email}")
-    
+
+    # Rate limiting check
+    client_ip = get_client_ip(request) or "unknown"
+    now = time.time()
+    # Prune timestamps outside the 15-minute window
+    _login_attempts[client_ip] = [t for t in _login_attempts[client_ip] if now - t < RATE_LIMIT_WINDOW_SECONDS]
+
+    if len(_login_attempts[client_ip]) >= MAX_LOGIN_ATTEMPTS:
+        logger.warning(f"Rate limit exceeded for IP {client_ip} attempting login on {clean_email}")
+        log_event(
+            db,
+            action="login_rate_limited",
+            outcome="blocked",
+            request=request,
+            extra={"client_ip": client_ip}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Please wait 15 minutes before retrying."
+        )
+
     try:
         user = db.query(User).filter(User.email == clean_email).first()
     except SQLAlchemyError as e:
@@ -74,16 +112,17 @@ def login(login_data: UserLogin, db: Session = Depends(get_db)):
             detail="Database service error during authentication. Please check database connectivity."
         )
 
-    if not user:
-        logger.warning(f"Login failed: user not found ({clean_email})")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password.",
-            headers={"WWW-Authenticate": "Bearer"},
+    if not user or not verify_password(login_data.password, user.hashed_password):
+        # Record attempt for rate limiting
+        _login_attempts[client_ip].append(now)
+        logger.warning(f"Login failed: invalid credentials for {clean_email}")
+        log_event(
+            db,
+            action="login_failed",
+            outcome="failure",
+            request=request,
+            extra={"client_ip": client_ip}
         )
-
-    if not verify_password(login_data.password, user.hashed_password):
-        logger.warning(f"Login failed: invalid password for {clean_email}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password.",
@@ -92,10 +131,31 @@ def login(login_data: UserLogin, db: Session = Depends(get_db)):
     
     if not user.is_active:
         logger.warning(f"Login rejected: account is inactive ({clean_email})")
+        log_event(
+            db,
+            action="login_inactive_rejected",
+            actor_id=user.id,
+            actor_role=user.role,
+            outcome="forbidden",
+            request=request,
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is currently inactive. Contact your administrator."
         )
+
+    # Clear rate limit counter on success
+    if client_ip in _login_attempts:
+        _login_attempts[client_ip] = []
+
+    log_event(
+        db,
+        action="login_success",
+        actor_id=user.id,
+        actor_role=user.role,
+        outcome="success",
+        request=request,
+    )
 
     try:
         token = create_access_token(subject=user.id, role=user.role)

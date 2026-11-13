@@ -1,6 +1,7 @@
 import { apiRequest, API_BASE } from './apiClient';
 import {
   MedicalDocument,
+  DocumentPageItem,
   TimelineEvent,
   MedicationItem,
   ConditionItem,
@@ -15,20 +16,36 @@ import {
 } from '../types/patient';
 
 export const recordService = {
-  getDocuments: (patientId: string, category?: string, search?: string, sortBy?: string) => {
+  getDocuments: (
+    patientId: string,
+    category?: string,
+    search?: string,
+    sortBy?: string,
+    hospital?: string,
+    includeDeleted?: boolean
+  ) => {
     const params = new URLSearchParams();
     if (category) params.append('category', category);
     if (search) params.append('search', search);
     if (sortBy) params.append('sort_by', sortBy);
+    if (hospital) params.append('hospital', hospital);
+    if (includeDeleted) params.append('include_deleted', 'true');
     const query = params.toString() ? `?${params.toString()}` : '';
     return apiRequest<MedicalDocument[]>(`/patients/${patientId}/documents${query}`);
   },
 
-  uploadDocument: async (patientId: string, file: File, documentType: string, documentDate?: string) => {
+  uploadDocument: async (
+    patientId: string,
+    file: File,
+    documentType: string,
+    documentDate?: string,
+    sourceHospital?: string
+  ): Promise<MedicalDocument> => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('document_type', documentType);
     if (documentDate) formData.append('document_date', documentDate);
+    if (sourceHospital) formData.append('source_hospital_or_clinic', sourceHospital);
 
     const token = localStorage.getItem('myclinix_token');
     const response = await fetch(`${API_BASE}/patients/${patientId}/documents`, {
@@ -44,6 +61,54 @@ export const recordService = {
       throw new Error(err.detail || 'Failed to upload document');
     }
     return response.json();
+  },
+
+  getDocumentPages: (patientId: string, documentId: string) => {
+    return apiRequest<DocumentPageItem[]>(`/patients/${patientId}/documents/${documentId}/pages`);
+  },
+
+  deleteDocument: (patientId: string, documentId: string, reason?: string) => {
+    const query = reason ? `?reason=${encodeURIComponent(reason)}` : '';
+    return apiRequest<{ message: string; id: string; is_deleted: boolean }>(
+      `/patients/${patientId}/documents/${documentId}${query}`,
+      {
+        method: 'DELETE',
+      }
+    );
+  },
+
+  restoreDocument: (patientId: string, documentId: string) => {
+    return apiRequest<{ message: string; id: string; is_deleted: boolean }>(
+      `/patients/${patientId}/documents/${documentId}/restore`,
+      {
+        method: 'POST',
+      }
+    );
+  },
+
+  downloadDocumentFile: async (patientId: string, documentId: string, fileName: string): Promise<void> => {
+    const token = localStorage.getItem('myclinix_token');
+    const response = await fetch(`${API_BASE}/patients/${patientId}/documents/${documentId}/download`, {
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (!response.ok) {
+      throw new Error('Failed to download document file from secure storage.');
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
+
+  exportPatientData: (patientId: string) => {
+    return apiRequest<any>(`/patients/${patientId}/export`);
   },
 
   getTimeline: (patientId: string, category?: string, order: string = 'asc') => {

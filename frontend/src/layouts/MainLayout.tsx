@@ -113,6 +113,11 @@ export const MainLayout: React.FC = () => {
           badge: 'AI',
         },
         {
+          name: 'Doctor Access & Consent',
+          path: '/consent',
+          icon: ShieldCheck,
+        },
+        {
           name: 'Settings',
           path: '/settings',
           icon: SettingsIcon,
@@ -187,6 +192,11 @@ export const MainLayout: React.FC = () => {
           path: '/ask-ai',
           icon: Sparkles,
           badge: 'AI',
+        },
+        {
+          name: 'Doctor Access & Consent',
+          path: '/consent',
+          icon: ShieldCheck,
         },
         {
           name: 'Settings',
@@ -268,6 +278,11 @@ export const MainLayout: React.FC = () => {
         path: '/ask-ai',
         icon: Sparkles,
         badge: 'AI',
+      },
+      {
+        name: 'Security Audit Logs',
+        path: '/admin/audit-logs',
+        icon: ShieldAlert,
       },
       {
         name: 'Settings & Governance',
