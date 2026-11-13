@@ -16,18 +16,24 @@ import {
   Search,
   Bell,
   LogOut,
-  ChevronDown,
   ShieldAlert,
   User as UserIcon,
   Menu,
   X,
   Stethoscope,
+  Activity,
+  Shield,
+  ShieldCheck,
+  TrendingUp,
   Globe,
   Plane,
+  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { usePatient } from '../hooks/usePatient';
 import { Badge } from '../components/ui/Badge';
+import { UserRole } from '../types/auth';
+import { FloatingAiChatbot } from '../components/FloatingAiChatbot';
 
 export const MainLayout: React.FC = () => {
   const { user, logout } = useAuth();
@@ -36,49 +42,260 @@ export const MainLayout: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const navigate = useNavigate();
 
-  const navigationItems = [
-    { name: 'Overview', path: '/overview', icon: LayoutDashboard },
-    {
-      name: 'Global Health Passport',
-      path: '/passport',
-      icon: Globe,
-      badge: 'Travel Mode',
-    },
-    { name: 'Patients', path: '/patients', icon: Users, badge: patients.length ? `${patients.length}` : undefined },
-    { name: 'Medical Documents', path: '/documents', icon: FileText, badge: selectedPatient?.documents_count ? `${selectedPatient.documents_count}` : undefined },
-    { name: 'Medical Timeline', path: '/timeline', icon: Clock },
-    { name: 'Medication History', path: '/medications', icon: Pill },
-    { name: 'Conditions & Allergies', path: '/conditions-allergies', icon: HeartPulse },
-    { name: 'Investigations', path: '/investigations', icon: FlaskConical },
-    {
-      name: 'Conflicts & Missing Info',
-      path: '/conflicts',
-      icon: AlertOctagon,
-      alert: (selectedPatient?.contradictions_count || 0) > 0,
-      badge: selectedPatient?.contradictions_count ? `${selectedPatient.contradictions_count}` : undefined,
-    },
-    { name: 'Ask MY CLINIX AI', path: '/ask-ai', icon: BotMessageSquare },
-    { name: 'Review & Verification', path: '/review', icon: CheckCheck },
-    { name: 'Accuracy & Analytics', path: '/analytics', icon: BarChart3 },
-    { name: 'Settings', path: '/settings', icon: SettingsIcon },
-  ];
+  // Role-specific Navigation Schemes
+  // For Patient: Strictly follows prompt:
+  // 1. Global Health Passport
+  // 2. Overview
+  // 3. Medical Documents
+  // 4. Medical Timeline
+  // 5. Medication History
+  // 6. View Patient's Record & Recovery
+  // 7. Conditions & Analysis
+  // 8. Conflicts
+  // 9. Missing Information
+  // 10. Settings
+  const getNavigationForRole = (role?: UserRole) => {
+    if (role === 'patient') {
+      return [
+        {
+          name: 'Global Health Passport',
+          path: '/passport',
+          icon: ShieldCheck,
+          badge: 'Verified',
+        },
+        {
+          name: 'Overview',
+          path: '/overview',
+          icon: LayoutDashboard,
+        },
+        {
+          name: 'Medical Documents',
+          path: '/documents',
+          icon: FileText,
+          badge: selectedPatient?.documents_count ? `${selectedPatient.documents_count}` : undefined,
+        },
+        {
+          name: 'Medical Timeline',
+          path: '/timeline',
+          icon: Clock,
+        },
+        {
+          name: 'Medication History',
+          path: '/medications',
+          icon: Pill,
+        },
+        {
+          name: "View Patient's Record & Recovery",
+          path: '/recovery',
+          icon: TrendingUp,
+        },
+        {
+          name: 'Conditions & Analysis',
+          path: '/conditions-analysis',
+          icon: HeartPulse,
+        },
+        {
+          name: 'Conflicts',
+          path: '/conflicts',
+          icon: AlertOctagon,
+          alert: (selectedPatient?.contradictions_count || 0) > 0,
+          badge: selectedPatient?.contradictions_count ? `${selectedPatient.contradictions_count}` : undefined,
+        },
+        {
+          name: 'Missing Information',
+          path: '/missing-information',
+          icon: CheckCheck,
+        },
+        {
+          name: 'Ask MY CLINIX',
+          path: '/ask-ai',
+          icon: Sparkles,
+          badge: 'AI',
+        },
+        {
+          name: 'Settings',
+          path: '/settings',
+          icon: SettingsIcon,
+        },
+      ];
+    }
+
+    if (role === 'doctor') {
+      return [
+        {
+          name: 'Global Health Passport',
+          path: '/passport',
+          icon: ShieldCheck,
+          badge: 'Verified',
+        },
+        {
+          name: 'Overview',
+          path: '/overview',
+          icon: LayoutDashboard,
+        },
+        {
+          name: 'Authorized Patients',
+          path: '/patients',
+          icon: Users,
+          badge: patients.length ? `${patients.length}` : undefined,
+        },
+        {
+          name: 'Medical Documents',
+          path: '/documents',
+          icon: FileText,
+          badge: selectedPatient?.documents_count ? `${selectedPatient.documents_count}` : undefined,
+        },
+        {
+          name: 'Medical Timeline',
+          path: '/timeline',
+          icon: Clock,
+        },
+        {
+          name: 'Medication History',
+          path: '/medications',
+          icon: Pill,
+        },
+        {
+          name: 'Conditions & Analysis',
+          path: '/conditions-analysis',
+          icon: HeartPulse,
+        },
+        {
+          name: 'Patient Record & Recovery',
+          path: '/recovery',
+          icon: TrendingUp,
+        },
+        {
+          name: 'Conflicts',
+          path: '/conflicts',
+          icon: AlertOctagon,
+          alert: (selectedPatient?.contradictions_count || 0) > 0,
+          badge: selectedPatient?.contradictions_count ? `${selectedPatient.contradictions_count}` : undefined,
+        },
+        {
+          name: 'Missing Information',
+          path: '/missing-information',
+          icon: CheckCheck,
+        },
+        {
+          name: 'Doctor Review & Verification',
+          path: '/review',
+          icon: ShieldAlert,
+        },
+        {
+          name: 'Ask MY CLINIX',
+          path: '/ask-ai',
+          icon: Sparkles,
+          badge: 'AI',
+        },
+        {
+          name: 'Settings',
+          path: '/settings',
+          icon: SettingsIcon,
+        },
+      ];
+    }
+
+    // Default: Administrator
+    return [
+      {
+        name: 'Global Health Passport',
+        path: '/passport',
+        icon: ShieldCheck,
+        badge: 'Verified',
+      },
+      {
+        name: 'Overview',
+        path: '/overview',
+        icon: LayoutDashboard,
+      },
+      {
+        name: 'Patients Management',
+        path: '/patients',
+        icon: Users,
+        badge: patients.length ? `${patients.length}` : undefined,
+      },
+      {
+        name: 'Medical Documents',
+        path: '/documents',
+        icon: FileText,
+        badge: selectedPatient?.documents_count ? `${selectedPatient.documents_count}` : undefined,
+      },
+      {
+        name: 'Medical Timeline',
+        path: '/timeline',
+        icon: Clock,
+      },
+      {
+        name: 'Medication History',
+        path: '/medications',
+        icon: Pill,
+      },
+      {
+        name: 'Conditions & Analysis',
+        path: '/conditions-analysis',
+        icon: HeartPulse,
+      },
+      {
+        name: 'Patient Record & Recovery',
+        path: '/recovery',
+        icon: TrendingUp,
+      },
+      {
+        name: 'Conflicts',
+        path: '/conflicts',
+        icon: AlertOctagon,
+        alert: (selectedPatient?.contradictions_count || 0) > 0,
+        badge: selectedPatient?.contradictions_count ? `${selectedPatient.contradictions_count}` : undefined,
+      },
+      {
+        name: 'Missing Information',
+        path: '/missing-information',
+        icon: CheckCheck,
+      },
+      {
+        name: 'Doctor Review & Verification',
+        path: '/review',
+        icon: ShieldAlert,
+      },
+      {
+        name: 'Platform Analytics',
+        path: '/analytics',
+        icon: BarChart3,
+      },
+      {
+        name: 'Ask MY CLINIX',
+        path: '/ask-ai',
+        icon: Sparkles,
+        badge: 'AI',
+      },
+      {
+        name: 'Settings & Governance',
+        path: '/settings',
+        icon: SettingsIcon,
+      },
+    ];
+  };
+
+  const navigationItems = getNavigationForRole(user?.role);
 
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
 
-  const roleLabels: Record<string, { label: string; variant: 'primary' | 'secondary' | 'warning' | 'neutral' }> = {
-    administrator: { label: 'Admin', variant: 'primary' },
-    patient: { label: 'Patient', variant: 'secondary' },
-    caregiver: { label: 'Caregiver', variant: 'warning' },
-    medical_reviewer: { label: 'Reviewer', variant: 'neutral' },
+  const roleLabels: Record<string, { label: string; variant: 'primary' | 'secondary' | 'neutral'; icon: any }> = {
+    administrator: { label: 'Administrator', variant: 'primary', icon: Shield },
+    doctor: { label: 'Doctor', variant: 'secondary', icon: Activity },
+    patient: { label: 'Patient', variant: 'neutral', icon: UserIcon },
   };
 
-  const userRole: { label: string; variant: 'primary' | 'secondary' | 'warning' | 'neutral' } =
+  const userRoleConfig =
     user?.role && roleLabels[user.role]
       ? roleLabels[user.role]
-      : { label: user?.role || 'User', variant: 'neutral' };
+      : { label: user?.role || 'User', variant: 'neutral' as const, icon: UserIcon };
+
+  const RoleIcon = userRoleConfig.icon;
 
   return (
     <div className="min-h-screen flex flex-col bg-[#f8fafc]">
@@ -154,7 +371,7 @@ export const MainLayout: React.FC = () => {
           </button>
         </div>
 
-        {/* Right: Notifications, User Profile & Logout */}
+        {/* Right: User Role Badge, Profile & Logout */}
         <div className="flex items-center gap-3">
           <button className="relative p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer">
             <Bell className="w-4 h-4" />
@@ -171,8 +388,11 @@ export const MainLayout: React.FC = () => {
             <div className="hidden lg:block text-left">
               <div className="text-xs font-semibold text-slate-800 leading-tight">{user?.full_name}</div>
               <div className="flex items-center gap-1.5 mt-0.5">
-                <Badge variant={userRole.variant} size="sm">
-                  {userRole.label}
+                <Badge variant={userRoleConfig.variant} size="sm">
+                  <span className="flex items-center gap-1">
+                    <RoleIcon className="w-3 h-3" />
+                    <span>{userRoleConfig.label}</span>
+                  </span>
                 </Badge>
               </div>
             </div>
@@ -260,16 +480,21 @@ export const MainLayout: React.FC = () => {
               <span>Evidence Traceability</span>
             </div>
             <p className="text-[10px] text-slate-500 leading-tight">
-              All findings link strictly to verifiable source passages. Never provides diagnoses or medical advice.
+              All findings link strictly to verifiable source passages. Never provides unsupervised diagnoses.
             </p>
           </div>
         </aside>
 
         {/* Main Content Viewport */}
-        <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 overflow-y-auto max-w-7xl">
+        <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 overflow-y-auto max-w-7xl relative">
           <Outlet />
+
+          {/* Floating AI Chatbot Widget (Bottom-Right) */}
+          <FloatingAiChatbot />
         </main>
       </div>
     </div>
   );
 };
+
+export default MainLayout;

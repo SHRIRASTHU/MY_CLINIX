@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Stethoscope, UserCheck, Shield, ArrowRight } from 'lucide-react';
+import { Stethoscope, UserCheck, Shield } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { UserRole } from '../types/auth';
 import { Input } from '../components/ui/Input';
@@ -88,7 +88,7 @@ export const RegisterPage: React.FC = () => {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="e.g. jennifer.adams@hospital.org"
+              placeholder="e.g. physician@hospital.org"
               required
             />
 
@@ -110,9 +110,8 @@ export const RegisterPage: React.FC = () => {
                 onChange={(e) => setRole(e.target.value as UserRole)}
                 className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-[#0d9488] text-slate-900 cursor-pointer"
               >
-                <option value="patient">Patient (Manage personal records)</option>
-                <option value="caregiver">Caregiver (Assisting family or dependents)</option>
-                <option value="medical_reviewer">Medical Reviewer (Verification & Conflict Resolution)</option>
+                <option value="patient">Patient (Manage personal records & health passport)</option>
+                <option value="doctor">Doctor (Clinical Review & Medical Verification)</option>
                 <option value="administrator">Administrator (System & Data Governance)</option>
               </select>
             </div>

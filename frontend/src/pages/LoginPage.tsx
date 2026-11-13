@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Stethoscope, Lock, Mail, ShieldCheck, ArrowRight } from 'lucide-react';
+import { Stethoscope, Lock, ShieldCheck, User, Shield, Activity } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
@@ -107,43 +107,46 @@ export const LoginPage: React.FC = () => {
             </Button>
           </form>
 
-          {/* Quick Demo Access Bar */}
+          {/* Quick Demo Access for 3 Roles: Administrator, Doctor, Patient */}
           <div className="mt-6 pt-5 border-t border-slate-100">
             <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2.5 text-center">
-              Demonstration Quick Accounts
+              Quick Demonstration Accounts
             </p>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
                 onClick={() => fillDemo('admin@myclinix.org')}
-                className="text-left p-2 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer text-xs"
+                className="text-left p-2.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer text-xs"
               >
-                <div className="font-semibold text-slate-800">Admin Account</div>
-                <div className="text-[10px] text-slate-500">admin@myclinix.org</div>
+                <div className="flex items-center gap-1.5 font-semibold text-slate-800 text-[11px]">
+                  <Shield className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Admin</span>
+                </div>
+                <div className="text-[10px] text-slate-500 truncate mt-0.5">admin@myclinix.org</div>
               </button>
+
               <button
                 type="button"
-                onClick={() => fillDemo('reviewer@myclinix.org')}
-                className="text-left p-2 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer text-xs"
+                onClick={() => fillDemo('doctor@myclinix.org')}
+                className="text-left p-2.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer text-xs"
               >
-                <div className="font-semibold text-slate-800">Medical Reviewer</div>
-                <div className="text-[10px] text-slate-500">reviewer@myclinix.org</div>
+                <div className="flex items-center gap-1.5 font-semibold text-slate-800 text-[11px]">
+                  <Activity className="w-3.5 h-3.5 text-teal-600" />
+                  <span>Doctor</span>
+                </div>
+                <div className="text-[10px] text-slate-500 truncate mt-0.5">doctor@myclinix.org</div>
               </button>
-              <button
-                type="button"
-                onClick={() => fillDemo('caregiver@myclinix.org')}
-                className="text-left p-2 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer text-xs"
-              >
-                <div className="font-semibold text-slate-800">Caregiver</div>
-                <div className="text-[10px] text-slate-500">caregiver@myclinix.org</div>
-              </button>
+
               <button
                 type="button"
                 onClick={() => fillDemo('patient@myclinix.org')}
-                className="text-left p-2 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer text-xs"
+                className="text-left p-2.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer text-xs"
               >
-                <div className="font-semibold text-slate-800">Patient</div>
-                <div className="text-[10px] text-slate-500">patient@myclinix.org</div>
+                <div className="flex items-center gap-1.5 font-semibold text-slate-800 text-[11px]">
+                  <User className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Patient</span>
+                </div>
+                <div className="text-[10px] text-slate-500 truncate mt-0.5">patient@myclinix.org</div>
               </button>
             </div>
           </div>

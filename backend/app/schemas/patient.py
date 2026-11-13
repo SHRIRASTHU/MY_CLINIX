@@ -37,7 +37,7 @@ class PatientAccessOut(BaseModel):
 
 class PatientAccessCreate(BaseModel):
     user_email: str
-    access_level: str = Field("viewer", pattern="^(owner|caregiver|reviewer|viewer)$")
+    access_level: str = Field("viewer", pattern="^(owner|doctor|viewer)$")
 
 class PatientOut(PatientBase):
     id: str

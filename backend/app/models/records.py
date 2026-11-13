@@ -196,3 +196,32 @@ class ChatHistory(Base):
 
     patient = relationship("Patient", back_populates="chat_history")
     user = relationship("User", back_populates="chat_queries")
+
+class AIConversation(Base, TimestampMixin):
+    __tablename__ = "ai_conversations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(50), nullable=False)  # "patient", "doctor", "administrator"
+    title: Mapped[str] = mapped_column(String(255), nullable=False, default="New Consultation")
+    patient_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("patients.id", ondelete="CASCADE"), nullable=True, index=True)
+
+    # Relationships
+    user = relationship("User")
+    patient = relationship("Patient")
+    messages = relationship("AIMessage", back_populates="conversation", cascade="all, delete-orphan", order_by="AIMessage.created_at")
+
+class AIMessage(Base, TimestampMixin):
+    __tablename__ = "ai_messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    conversation_id: Mapped[str] = mapped_column(String(36), ForeignKey("ai_conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    sender: Mapped[str] = mapped_column(String(20), nullable=False)  # "user" or "assistant"
+    message_content: Mapped[str] = mapped_column(Text, nullable=False)
+    citations: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-encoded array
+    recommendations: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-encoded array
+    questions_for_doctor: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON-encoded array
+    disclaimer: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Relationships
+    conversation = relationship("AIConversation", back_populates="messages")

@@ -16,7 +16,7 @@ MY CLINIX reconciles these disparate documents into an immutable, chronological,
 - **Contradiction Detection:** Opposing clinical claims (e.g. conflicting allergy records, differing lab values) are displayed side-by-side with original sources rather than silently merged.
 - **Strict Absence Principle:** Distinguishes between explicit positive findings, explicit negative assertions (*"No known drug allergies"*), and undocumented entries (*"Not documented in this record"*).
 - **Medication Lifecycle Integrity:** Older prescriptions are not assumed active, and newer prescriptions do not automatically imply older therapies were discontinued without explicit evidence.
-- **Human-in-the-Loop Audit Trail:** Reviewer corrections are preserved in an append-only audit log without ever overwriting raw source documents or AI extraction logs.
+- **Human-in-the-Loop Audit Trail:** Doctor corrections are preserved in an append-only audit log without ever overwriting raw source documents or AI extraction logs.
 - **Never Diagnoses:** The system never provides medical diagnoses or treatment recommendations.
 
 ---
@@ -90,9 +90,9 @@ All tables utilize **UUID primary keys** with foreign keys, timestamps, and inde
 
 | Table | Purpose |
 |---|---|
-| `users` | User accounts, credentials, and roles (`administrator`, `patient`, `caregiver`, `medical_reviewer`). |
+| `users` | User accounts, credentials, and roles (`administrator`, `doctor`, `patient`). |
 | `patients` | Patient demographic, vital baseline, and creator reference. |
-| `patient_access` | Row-level data isolation mapping users to patient profiles with permission levels (`owner`, `caregiver`, `reviewer`, `viewer`). |
+| `patient_access` | Row-level data isolation mapping users to patient profiles with permission levels (`owner`, `doctor`, `viewer`). |
 | `documents` | Preserved original files, cryptographic SHA-256 hashes, OCR text, and processing statuses. |
 | `extracted_findings` | Atomic medical findings with exact source text spans, page numbers, precision, and confidence. |
 | `medical_events` | Chronological timeline events distinct from document upload dates. |
@@ -101,7 +101,7 @@ All tables utilize **UUID primary keys** with foreign keys, timestamps, and inde
 | `investigations` | Laboratory test results with original units and abnormal reference flags. |
 | `contradictions` | Conflicting assertions between two documents awaiting human resolution. |
 | `duplicates` | Cryptographic SHA-256 and semantic duplicate detection relationships. |
-| `review_history` | Append-only audit log tracking reviewer corrections, timestamps, and reasons. |
+| `review_history` | Append-only audit log tracking doctor verification and corrections, timestamps, and reasons. |
 | `chat_history` | Evidentiary AI queries, answers, and cited document references. |
 
 ---
@@ -160,14 +160,13 @@ Visit `http://localhost:5173` in your browser.
 
 ## 6. Demonstration Accounts
 
-The database seed provides four pre-configured roles with password `DemoPass123!`:
+The database seed provides three pre-configured roles with password `DemoPass123!`:
 
 | Role | Email | Capabilities |
 |---|---|---|
-| **Administrator** | `admin@myclinix.org` | Global system audit, cross-patient access, user governance. |
-| **Medical Reviewer** | `reviewer@myclinix.org` | Audit extracted findings, resolve contradictions, flag inaccuracies. |
-| **Caregiver** | `caregiver@myclinix.org` | Manage authorized family member records and upload clinical notes. |
-| **Patient** | `patient@myclinix.org` | Primary profile owner with access to Arthur Vance's records. |
+| **Administrator** | `admin@myclinix.org` | Global system audit, doctor verification, user governance, platform monitoring. |
+| **Doctor** | `doctor@myclinix.org` | Attending physician review, clinical audit, document verification, contradiction resolution. |
+| **Patient** | `patient@myclinix.org` | Primary profile owner, Global Health Passport, medication history, recovery tracking. |
 
 ---
 
