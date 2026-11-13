@@ -25,6 +25,8 @@ import {
   Shield,
   ShieldCheck,
   TrendingUp,
+  Globe,
+  Plane,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { usePatient } from '../hooks/usePatient';
@@ -305,13 +307,13 @@ export const MainLayout: React.FC = () => {
           </div>
         </div>
 
-        {/* Center: Search & Active Patient Indicator */}
-        <div className="flex items-center gap-3 flex-1 max-w-xl mx-4 hidden md:flex">
-          <div className="relative w-64">
+        {/* Center: Search & Active Patient Indicator & Travel Mode Quick Pill */}
+        <div className="flex items-center gap-3 flex-1 max-w-2xl mx-4 hidden md:flex">
+          <div className="relative w-56">
             <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
             <input
               type="text"
-              placeholder="Search findings, tests, drugs..."
+              placeholder="Search findings, tests..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-[#0d9488] focus:bg-white transition-all text-slate-800"
@@ -321,7 +323,7 @@ export const MainLayout: React.FC = () => {
           {/* Active Patient Selector */}
           <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs">
             <UserIcon className="w-3.5 h-3.5 text-[#0d9488]" />
-            <span className="text-slate-500 font-medium">Active Patient:</span>
+            <span className="text-slate-500 font-medium">Patient:</span>
             {patients.length > 0 ? (
               <select
                 value={selectedPatient?.id || ''}
@@ -330,7 +332,7 @@ export const MainLayout: React.FC = () => {
               >
                 {patients.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.first_name} {p.last_name} ({p.blood_group}, DOB: {p.date_of_birth})
+                    {p.first_name} {p.last_name} ({p.blood_group})
                   </option>
                 ))}
               </select>
@@ -338,6 +340,16 @@ export const MainLayout: React.FC = () => {
               <span className="text-amber-600 font-medium">No patient selected</span>
             )}
           </div>
+
+          {/* Direct Flagship Travel Mode Shortcut Pill */}
+          <button
+            onClick={() => navigate('/passport')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-teal-50 to-emerald-50 border border-teal-200 text-teal-800 hover:border-teal-300 text-xs font-bold transition-all shadow-2xs cursor-pointer ml-auto"
+          >
+            <Globe className="w-3.5 h-3.5 text-[#0d9488]" />
+            <span>Travel Mode</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse ml-0.5" />
+          </button>
         </div>
 
         {/* Right: User Role Badge, Profile & Logout */}
@@ -426,8 +438,10 @@ export const MainLayout: React.FC = () => {
                   </div>
                   {item.badge && (
                     <span
-                      className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full ${
-                        item.alert
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        item.badge === 'Travel Mode'
+                          ? 'bg-teal-600 text-white'
+                          : item.alert
                           ? 'bg-rose-500 text-white'
                           : 'bg-slate-100 text-slate-600 group-hover:bg-slate-200'
                       }`}

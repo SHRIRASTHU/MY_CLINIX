@@ -20,6 +20,7 @@ import { MissingInformationPage } from './pages/MissingInformationPage';
 import { ReviewPage } from './pages/ReviewPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { GlobalPassportPage } from './pages/GlobalPassportPage';
 
 export const App: React.FC = () => {
   return (
@@ -47,6 +48,7 @@ export const App: React.FC = () => {
 
               {/* Section 1: Overview */}
               <Route path="overview" element={<OverviewPage />} />
+              <Route path="travel-mode" element={<GlobalPassportPage />} />
 
               {/* Section 2: Medical Documents */}
               <Route path="documents" element={<DocumentsPage />} />

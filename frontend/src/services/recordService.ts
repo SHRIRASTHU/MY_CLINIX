@@ -1,4 +1,4 @@
-import { apiRequest } from './apiClient';
+import { apiRequest, API_BASE } from './apiClient';
 import {
   MedicalDocument,
   TimelineEvent,
@@ -30,8 +30,8 @@ export const recordService = {
     formData.append('document_type', documentType);
     if (documentDate) formData.append('document_date', documentDate);
 
-    const token = localStorage.getItem('token');
-    const response = await fetch(`/api/v1/patients/${patientId}/documents`, {
+    const token = localStorage.getItem('myclinix_token');
+    const response = await fetch(`${API_BASE}/patients/${patientId}/documents`, {
       method: 'POST',
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
